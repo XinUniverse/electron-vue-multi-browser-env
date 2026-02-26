@@ -3,12 +3,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MatrixService } from './services/matrix-service.js';
-import {
-  validateAddAccountPayload,
-  validateGenerateContentPayload,
-  validateNavigatePayload,
-  validateSchedulePayload,
-} from './utils/validators.js';
+import { registerIpcHandlers } from './ipc/register-handlers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -144,15 +139,7 @@ function navigateContext(id, url) {
   return true;
 }
 
-function withGuard(handler) {
-  return async (_, payload = {}) => {
-    try {
-      return await handler(payload);
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : 'unknown error' };
-    }
-  };
-}
+
 
 app.whenReady().then(() => {
   createMainWindow();
@@ -160,55 +147,24 @@ app.whenReady().then(() => {
   const first = createIsolatedContext('https://example.com');
   attachContext(first.id);
 
-  schedulerId = setInterval(() => matrixService.runDueTasks(), 1000);
+  schedulerId = setInterval(() => {
+    matrixService.runDueTasks().catch((error) => {
+      console.error('scheduler runDueTasks error:', error);
+    });
+  }, 1000);
 
-  ipcMain.handle('contexts:create', withGuard(async ({ url }) => {
-    const ctx = createIsolatedContext(url);
-    attachContext(ctx.id);
-    return { ok: true, context: ctx };
-  }));
-
-  ipcMain.handle('contexts:switch', withGuard(async ({ id }) => ({ ok: attachContext(id) })));
-  ipcMain.handle('contexts:close', withGuard(async ({ id }) => ({ ok: closeContext(id) })));
-
-  ipcMain.handle('contexts:navigate', withGuard(async (payload) => {
-    validateNavigatePayload(payload);
-    return { ok: navigateContext(payload.id, payload.url) };
-  }));
-
-  ipcMain.handle('contexts:list', withGuard(async () => ({
-    ok: true,
-    contexts: [...contexts.values()].map(serializeContext),
-    activeContextId,
-  })));
-
-  ipcMain.handle('matrix:getPlatforms', withGuard(async () => ({ ok: true, platforms: matrixService.getPlatforms() })));
-  ipcMain.handle('matrix:listAccounts', withGuard(async () => ({ ok: true, accounts: matrixService.listAccounts() })));
-
-  ipcMain.handle('matrix:addAccount', withGuard(async (payload) => {
-    validateAddAccountPayload(payload);
-    const account = matrixService.addAccount(payload);
-    return { ok: true, account };
-  }));
-
-  ipcMain.handle('matrix:collectHotspots', withGuard(async () => ({ ok: true, hotspots: matrixService.collectHotspots() })));
-  ipcMain.handle('matrix:listHotspots', withGuard(async () => ({ ok: true, hotspots: matrixService.listHotspots() })));
-
-  ipcMain.handle('matrix:generateContent', withGuard(async (payload) => {
-    validateGenerateContentPayload(payload);
-    const content = matrixService.generateContent(payload);
-    if (!content) return { ok: false, error: 'hotspot not found' };
-    return { ok: true, content };
-  }));
-
-  ipcMain.handle('matrix:schedulePublish', withGuard(async (payload) => {
-    validateSchedulePayload(payload);
-    const task = matrixService.schedulePublish(payload);
-    return { ok: true, task };
-  }));
-
-  ipcMain.handle('matrix:listSchedules', withGuard(async () => ({ ok: true, schedules: matrixService.listSchedules() })));
-  ipcMain.handle('matrix:listTaskLogs', withGuard(async () => ({ ok: true, logs: matrixService.listTaskLogs() })));
+  registerIpcHandlers({
+    ipcMain,
+    matrixService,
+    contextApi: {
+      createIsolatedContext,
+      attachContext,
+      closeContext,
+      navigateContext,
+      listContexts: () => [...contexts.values()].map(serializeContext),
+      getActiveContextId: () => activeContextId,
+    },
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
