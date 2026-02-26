@@ -1,91 +1,233 @@
-import { createApp, onMounted, onUnmounted, reactive } from 'vue';
+import { createApp, computed, onMounted, onUnmounted, reactive } from 'vue';
 
 const state = reactive({
-  newUrl: 'https://example.com',
+  addressInput: 'https://example.com',
   contexts: [],
   activeContextId: null,
+  pollingId: null,
+
+  platforms: [],
+  accounts: [],
+  hotspots: [],
+  schedules: [],
+  taskLogs: [],
+  generatedContent: null,
+  errorMessage: '',
+
+  accountForm: { platform: '抖音', nickname: '', aiEnabled: true },
+  generationForm: { hotspotId: '', type: '文章', tone: '专业' },
+  scheduleForm: { accountId: '', contentType: '文章', publishAt: '' },
 });
 
+const activeContext = computed(() => state.contexts.find((ctx) => ctx.id === state.activeContextId) || null);
+
+function readResult(result, fallback = {}) {
+  if (!result?.ok) {
+    state.errorMessage = result?.error || '操作失败';
+    return null;
+  }
+  state.errorMessage = '';
+  return { ...fallback, ...result };
+}
+
 async function refreshContexts() {
-  const payload = await window.isolatedBrowser.listContexts();
+  const payload = readResult(await window.isolatedBrowser.listContexts());
+  if (!payload) return;
   state.contexts = payload.contexts;
   state.activeContextId = payload.activeContextId;
+  if (activeContext.value?.currentUrl) state.addressInput = activeContext.value.currentUrl;
 }
 
-async function addContext() {
-  const result = await window.isolatedBrowser.createContext(state.newUrl);
-  if (result.ok) {
-    state.newUrl = 'https://example.com';
-    await refreshContexts();
-  }
+async function refreshMatrix() {
+  const [p0, a0, h0, s0, l0] = await Promise.all([
+    window.accountMatrix.getPlatforms(),
+    window.accountMatrix.listAccounts(),
+    window.accountMatrix.listHotspots(),
+    window.accountMatrix.listSchedules(),
+    window.accountMatrix.listTaskLogs(),
+  ]);
+
+  const p = readResult(p0);
+  const a = readResult(a0);
+  const h = readResult(h0);
+  const s = readResult(s0);
+  const l = readResult(l0);
+  if (!p || !a || !h || !s || !l) return;
+
+  state.platforms = p.platforms;
+  state.accounts = a.accounts;
+  state.hotspots = h.hotspots;
+  state.schedules = s.schedules;
+  state.taskLogs = l.logs;
+
+  if (!state.accountForm.platform && state.platforms.length) state.accountForm.platform = state.platforms[0];
 }
 
-async function switchContext(id) {
-  await window.isolatedBrowser.switchContext(id);
+async function addTab() {
+  const result = readResult(await window.isolatedBrowser.createContext('https://example.com'));
+  if (result) await refreshContexts();
+}
+
+async function switchTab(id) {
+  readResult(await window.isolatedBrowser.switchContext(id));
   await refreshContexts();
 }
 
-async function closeContext(id) {
-  await window.isolatedBrowser.closeContext(id);
+async function closeTab(id) {
+  readResult(await window.isolatedBrowser.closeContext(id));
   await refreshContexts();
 }
 
-function resizeBrowserArea() {
-  const topOffset = 80;
-  const leftOffset = 260;
-  const bounds = {
-    x: leftOffset,
-    y: topOffset,
-    width: Math.max(300, window.innerWidth - leftOffset - 20),
-    height: Math.max(200, window.innerHeight - topOffset - 20),
-  };
-  window.isolatedBrowser.resizeActiveView(bounds);
+async function navigateActiveTab() {
+  if (!state.activeContextId) return;
+  readResult(await window.isolatedBrowser.navigateContext(state.activeContextId, state.addressInput));
+  await refreshContexts();
+}
+
+async function submitAccount() {
+  if (!state.accountForm.nickname.trim()) return;
+  const result = readResult(await window.accountMatrix.addAccount(state.accountForm));
+  if (!result) return;
+  state.accountForm.nickname = '';
+  await refreshMatrix();
+}
+
+async function collectHotspots() {
+  const result = readResult(await window.accountMatrix.collectHotspots());
+  if (!result) return;
+  await refreshMatrix();
+  if (!state.generationForm.hotspotId && state.hotspots.length) state.generationForm.hotspotId = state.hotspots[0].id;
+}
+
+async function generateContent() {
+  if (!state.generationForm.hotspotId) return;
+  const result = readResult(await window.accountMatrix.generateContent(state.generationForm));
+  if (result?.content) state.generatedContent = result.content;
+}
+
+async function createSchedule() {
+  if (!state.scheduleForm.accountId || !state.scheduleForm.publishAt) return;
+  const result = readResult(await window.accountMatrix.schedulePublish(state.scheduleForm));
+  if (result) await refreshMatrix();
 }
 
 const App = {
   setup() {
     onMounted(async () => {
       await refreshContexts();
-      window.addEventListener('resize', resizeBrowserArea);
-      resizeBrowserArea();
+      await refreshMatrix();
+      state.pollingId = window.setInterval(async () => {
+        await refreshContexts();
+        await refreshMatrix();
+      }, 1500);
     });
 
     onUnmounted(() => {
-      window.removeEventListener('resize', resizeBrowserArea);
+      if (state.pollingId) window.clearInterval(state.pollingId);
     });
 
-    return { state, addContext, switchContext, closeContext };
+    return {
+      state,
+      activeContext,
+      addTab,
+      switchTab,
+      closeTab,
+      navigateActiveTab,
+      submitAccount,
+      collectHotspots,
+      generateContent,
+      createSchedule,
+    };
   },
   template: `
-    <main style="font-family: sans-serif; height: 100vh; overflow: hidden;">
-      <header style="height: 64px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #ddd; padding: 8px 12px;">
-        <strong>Electron + Vue 隔离浏览器</strong>
-        <input v-model="state.newUrl" style="flex: 1; padding: 8px;" placeholder="输入 URL" />
-        <button @click="addContext" style="padding: 8px 12px;">新建隔离会话</button>
-      </header>
+    <main style="font-family: Inter, -apple-system, sans-serif; height: 100vh; display: flex; flex-direction: column; background: #f7f7f9;">
+      <section style="height: 44px; border-bottom: 1px solid #d8d8dc; display: flex; align-items: center; gap: 8px; padding: 6px 10px; overflow-x: auto; background: #ececf1;">
+        <button @click="addTab" style="height: 30px; min-width: 30px; border: 1px solid #c5c5cc; border-radius: 8px; background: #fff;">+</button>
+        <div v-for="ctx in state.contexts" :key="ctx.id"
+          :style="{display:'inline-flex',alignItems:'center',gap:'6px',minWidth:'200px',maxWidth:'260px',padding:'6px 8px',borderRadius:'8px',border:'1px solid #c5c5cc',background:ctx.id===state.activeContextId?'#fff':'#e4e4ea'}">
+          <button @click="switchTab(ctx.id)" style="border:none;background:transparent;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;cursor:pointer;">
+            {{ ctx.title || '新标签页' }}
+          </button>
+          <button @click="closeTab(ctx.id)" style="border:none;background:transparent;cursor:pointer;">✕</button>
+        </div>
+      </section>
 
-      <section style="display: flex; height: calc(100vh - 64px);">
-        <aside style="width: 240px; border-right: 1px solid #ddd; overflow: auto; padding: 8px;">
-          <h3>会话列表</h3>
-          <div v-if="state.contexts.length === 0" style="color: #666; font-size: 13px;">
-            暂无会话，请先创建。
+      <section style="height: 56px; border-bottom: 1px solid #d8d8dc; display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #fff;">
+        <input v-model="state.addressInput" @keyup.enter="navigateActiveTab" placeholder="输入网址，例如 openai.com"
+          style="flex: 1; height: 34px; border-radius: 8px; border: 1px solid #cfcfd6; padding: 0 12px;" />
+        <button @click="navigateActiveTab" style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #bbb; background: #fff; cursor: pointer;">访问</button>
+      </section>
+
+      <section v-if="state.errorMessage" style="padding: 6px 12px; font-size: 12px; color: #b42318; background: #fef3f2; border-bottom: 1px solid #fecdca;">
+        {{ state.errorMessage }}
+      </section>
+
+      <section style="height: 270px; border-bottom: 1px solid #e4e4ea; background: #fff; overflow: auto; padding: 10px 12px;">
+        <h3 style="margin: 0 0 8px;">多平台账号矩阵管理模板（优先：抖音 / 小红书 / 头条）</h3>
+        <div style="display:grid;grid-template-columns: 1.1fr 1fr 1fr; gap:12px;">
+          <div style="border:1px solid #e8e8ed;border-radius:8px;padding:10px;">
+            <strong>1) 添加账号</strong>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <select v-model="state.accountForm.platform" style="height:30px;">
+                <option v-for="p in state.platforms" :key="p" :value="p">{{ p }}</option>
+              </select>
+              <input v-model="state.accountForm.nickname" placeholder="账号昵称" style="height:28px;flex:1;" />
+              <button @click="submitAccount">添加</button>
+            </div>
+            <div style="margin-top:8px;font-size:12px;color:#666;">已添加：{{ state.accounts.length }} 个</div>
           </div>
-          <div
-            v-for="ctx in state.contexts"
-            :key="ctx.id"
-            :style="{border: '1px solid #ddd', borderRadius: '8px', padding: '8px', marginBottom: '8px', background: ctx.id === state.activeContextId ? '#eef6ff' : '#fff'}"
-          >
-            <div style="font-size: 12px; color: #444; word-break: break-all;">{{ ctx.partition }}</div>
-            <div style="font-size: 12px; color: #777; margin: 4px 0; word-break: break-all;">{{ ctx.currentUrl || 'about:blank' }}</div>
-            <div style="display: flex; gap: 6px;">
-              <button @click="switchContext(ctx.id)">切换</button>
-              <button @click="closeContext(ctx.id)">关闭</button>
+
+          <div style="border:1px solid #e8e8ed;border-radius:8px;padding:10px;">
+            <strong>2) 热点收集 + AI 生成</strong>
+            <div style="margin-top:8px;display:flex;gap:8px;">
+              <button @click="collectHotspots">收集热点</button>
+              <select v-model="state.generationForm.hotspotId" style="flex:1;height:30px;">
+                <option value="">请选择热点</option>
+                <option v-for="h in state.hotspots" :key="h.id" :value="h.id">{{ h.platform }} | {{ h.topic }}</option>
+              </select>
+            </div>
+            <div style="margin-top:8px;display:flex;gap:8px;">
+              <select v-model="state.generationForm.type"><option>文章</option><option>视频脚本</option><option>图片文案</option></select>
+              <input v-model="state.generationForm.tone" placeholder="语气，如专业/活泼" style="flex:1;" />
+              <button @click="generateContent">生成</button>
             </div>
           </div>
-        </aside>
-        <div style="flex: 1; display: grid; place-items: center; color: #666;">
-          浏览内容由 BrowserView 承载。每个会话使用独立 partition，Cookie/Storage/Cache 完全隔离。
+
+          <div style="border:1px solid #e8e8ed;border-radius:8px;padding:10px;">
+            <strong>3) 自动发送（定时）</strong>
+            <div style="margin-top:8px;display:flex;gap:8px;">
+              <select v-model="state.scheduleForm.accountId" style="flex:1;">
+                <option value="">选择账号</option>
+                <option v-for="a in state.accounts" :key="a.id" :value="a.id">{{ a.platform }} - {{ a.nickname }}</option>
+              </select>
+              <select v-model="state.scheduleForm.contentType"><option>文章</option><option>视频</option><option>图片</option></select>
+            </div>
+            <div style="margin-top:8px;display:flex;gap:8px;">
+              <input type="datetime-local" v-model="state.scheduleForm.publishAt" style="flex:1;" />
+              <button @click="createSchedule">定时发布</button>
+            </div>
+            <div style="margin-top:8px;font-size:12px;color:#666;">任务数：{{ state.schedules.length }}</div>
+          </div>
         </div>
+
+        <div style="display:grid;grid-template-columns: 1fr 1fr; gap:12px; margin-top:10px;">
+          <div v-if="state.generatedContent" style="border:1px dashed #ccd; border-radius:8px; padding:8px; font-size:12px;">
+            <div><strong>AI 生成标题：</strong>{{ state.generatedContent.title }}</div>
+            <pre style="white-space:pre-wrap; margin:6px 0 0;">{{ state.generatedContent.body }}</pre>
+          </div>
+          <div style="border:1px dashed #ccd; border-radius:8px; padding:8px; font-size:12px; max-height:120px; overflow:auto;">
+            <div><strong>任务日志</strong></div>
+            <div v-for="log in state.taskLogs" :key="log.id" :style="{color: log.level === 'error' ? '#b42318' : '#344054'}">
+              [{{ log.level }}] {{ log.message }}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section style="flex: 1; display: grid; place-items: center; color: #8a8a93; font-size: 13px; padding: 4px 12px;">
+        当前标签 partition：{{ activeContext?.partition || '-' }}；每个标签使用独立存储环境（Cookie / LocalStorage / Cache 完全隔离）。
+        <br />
+        发布任务状态支持：scheduled / running / success / failed
       </section>
     </main>
   `,

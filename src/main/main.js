@@ -2,6 +2,8 @@ import { app, BrowserWindow, BrowserView, ipcMain, session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MatrixService } from './services/matrix-service.js';
+import { registerIpcHandlers } from './ipc/register-handlers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9,21 +11,45 @@ const __dirname = path.dirname(__filename);
 const contexts = new Map();
 let mainWindow;
 let activeContextId = null;
+let schedulerId = null;
 
-const defaultBounds = { x: 260, y: 80, width: 1000, height: 620 };
+const chromeHeight = 120;
+const sidebarWidth = 0;
+const matrixService = new MatrixService({ baseDir: app.getPath('userData') });
 
 function normalizeUrl(inputUrl) {
   if (!inputUrl) return 'https://example.com';
-  if (inputUrl.startsWith('http://') || inputUrl.startsWith('https://')) {
-    return inputUrl;
-  }
-  return `https://${inputUrl}`;
+  const value = inputUrl.trim();
+  if (!value) return 'https://example.com';
+  if (value.startsWith('http://') || value.startsWith('https://')) return value;
+  return `https://${value}`;
+}
+
+function getViewBounds() {
+  if (!mainWindow) return { x: 0, y: chromeHeight, width: 1000, height: 600 };
+  const [width, height] = mainWindow.getContentSize();
+  return {
+    x: sidebarWidth,
+    y: chromeHeight,
+    width: Math.max(320, width - sidebarWidth),
+    height: Math.max(200, height - chromeHeight),
+  };
+}
+
+function serializeContext({ id, partition, view }) {
+  return {
+    id,
+    partition,
+    currentUrl: view.webContents.getURL(),
+    title: view.webContents.getTitle() || '新标签页',
+    isLoading: view.webContents.isLoading(),
+  };
 }
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 720,
+    width: 1366,
+    height: 860,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -38,17 +64,20 @@ function createMainWindow() {
     mainWindow.loadURL('http://127.0.0.1:5173');
   }
 
+  mainWindow.on('resize', () => {
+    if (!activeContextId || !contexts.has(activeContextId)) return;
+    contexts.get(activeContextId).view.setBounds(getViewBounds());
+  });
+
   mainWindow.on('closed', () => {
     contexts.forEach(({ view }) => {
-      if (!view.webContents.isDestroyed()) {
-        view.webContents.destroy();
-      }
+      if (!view.webContents.isDestroyed()) view.webContents.destroy();
     });
     contexts.clear();
   });
 }
 
-function createIsolatedContext(url) {
+function createIsolatedContext(url = 'https://example.com') {
   const id = randomUUID();
   const partition = `persist:ctx-${id}`;
 
@@ -64,11 +93,9 @@ function createIsolatedContext(url) {
     },
   });
 
-  view.setBounds(defaultBounds);
   view.setAutoResize({ width: true, height: true });
-
+  view.setBounds(getViewBounds());
   view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-
   view.webContents.loadURL(normalizeUrl(url));
 
   contexts.set(id, { id, partition, view });
@@ -84,7 +111,7 @@ function attachContext(id) {
   }
 
   mainWindow.addBrowserView(ctx.view);
-  ctx.view.setBounds(defaultBounds);
+  ctx.view.setBounds(getViewBounds());
   activeContextId = id;
   return true;
 }
@@ -98,43 +125,45 @@ function closeContext(id) {
     activeContextId = null;
   }
 
-  if (!ctx.view.webContents.isDestroyed()) {
-    ctx.view.webContents.destroy();
-  }
+  if (!ctx.view.webContents.isDestroyed()) ctx.view.webContents.destroy();
   contexts.delete(id);
 
-  if (!activeContextId && contexts.size > 0) {
-    attachContext([...contexts.keys()][0]);
-  }
+  if (!activeContextId && contexts.size > 0) attachContext([...contexts.keys()][0]);
   return true;
 }
+
+function navigateContext(id, url) {
+  const ctx = contexts.get(id);
+  if (!ctx) return false;
+  ctx.view.webContents.loadURL(normalizeUrl(url));
+  return true;
+}
+
+
 
 app.whenReady().then(() => {
   createMainWindow();
 
-  ipcMain.handle('contexts:create', (_, { url }) => {
-    const ctx = createIsolatedContext(url);
-    attachContext(ctx.id);
-    return { ok: true, context: ctx };
-  });
+  const first = createIsolatedContext('https://example.com');
+  attachContext(first.id);
 
-  ipcMain.handle('contexts:switch', (_, { id }) => ({ ok: attachContext(id) }));
+  schedulerId = setInterval(() => {
+    matrixService.runDueTasks().catch((error) => {
+      console.error('scheduler runDueTasks error:', error);
+    });
+  }, 1000);
 
-  ipcMain.handle('contexts:close', (_, { id }) => ({ ok: closeContext(id) }));
-
-  ipcMain.handle('contexts:list', () => ({
-    contexts: [...contexts.values()].map(({ id, partition, view }) => ({
-      id,
-      partition,
-      currentUrl: view.webContents.getURL(),
-    })),
-    activeContextId,
-  }));
-
-  ipcMain.on('view:resize', (_, bounds) => {
-    if (!activeContextId || !contexts.has(activeContextId)) return;
-    const ctx = contexts.get(activeContextId);
-    ctx.view.setBounds(bounds);
+  registerIpcHandlers({
+    ipcMain,
+    matrixService,
+    contextApi: {
+      createIsolatedContext,
+      attachContext,
+      closeContext,
+      navigateContext,
+      listContexts: () => [...contexts.values()].map(serializeContext),
+      getActiveContextId: () => activeContextId,
+    },
   });
 
   app.on('activate', () => {
@@ -143,5 +172,6 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  if (schedulerId) clearInterval(schedulerId);
   if (process.platform !== 'darwin') app.quit();
 });
