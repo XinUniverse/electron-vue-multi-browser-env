@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { MatrixService } from '../src/main/services/matrix-service.js';
 
-function createTempService() {
+function createTempService({ alertReporter } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'matrix-service-'));
-  return { tmp, service: new MatrixService({ baseDir: tmp }) };
+  return { tmp, service: new MatrixService({ baseDir: tmp, alertReporter }) };
 }
 
 test('matrix service adds and lists account', () => {
@@ -47,7 +47,9 @@ test('scheduler transitions due tasks and records success metrics', async () => 
 });
 
 test('scheduler failed with mapped error code and alert after retries', async () => {
-  const { service } = createTempService();
+  const alertCalls = [];
+  const reporter = { notify: async (payload) => { alertCalls.push(payload); return { ok: true }; } };
+  const { service } = createTempService({ alertReporter: reporter });
   const account = service.addAccount({ platform: '抖音', nickname: '账号C', aiEnabled: false });
   const dueTime = new Date(Date.now() - 2000).toISOString();
   service.schedulePublish({ accountId: account.id, contentType: '模拟鉴权失败', publishAt: dueTime });
@@ -65,4 +67,6 @@ test('scheduler failed with mapped error code and alert after retries', async ()
 
   const logs = service.listTaskLogs();
   assert.ok(logs.some((log) => log.level === 'alert'));
+  assert.equal(alertCalls.length, 1);
+  assert.equal(alertCalls[0].event, 'publish_failed_final');
 });

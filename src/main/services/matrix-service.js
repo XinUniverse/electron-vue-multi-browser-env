@@ -2,13 +2,15 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { PlatformAdapterRegistry } from './platform-adapters.js';
+import { AlertReporter } from './alert-reporter.js';
 
 export class MatrixService {
-  constructor({ baseDir, platforms = ['抖音', '小红书', '头条'] }) {
+  constructor({ baseDir, platforms = ['抖音', '小红书', '头条'], alertReporter } = {}) {
     this.platforms = platforms;
     this.dbFile = path.join(baseDir, 'matrix-store.db');
     this.db = new DatabaseSync(this.dbFile);
     this.adapterRegistry = new PlatformAdapterRegistry();
+    this.alertReporter = alertReporter || new AlertReporter({ webhookUrl: process.env.ALERT_WEBHOOK_URL || '' });
     this.initSchema();
   }
 
@@ -226,6 +228,19 @@ export class MatrixService {
     `).run(randomUUID(), taskId, level, message, createdAt);
   }
 
+  async sendAlert(event, details) {
+    try {
+      await this.alertReporter.notify({
+        event,
+        details,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'unknown alert error';
+      this.logTask(details.taskId, 'warn', `告警上报失败：${msg}`);
+    }
+  }
+
 
   listPublishMetrics(limit = 50) {
     return this.db.prepare(`
@@ -262,6 +277,7 @@ export class MatrixService {
         this.db.prepare(`UPDATE schedules SET status = 'failed', completed_at = ?, error_message = ? WHERE id = ?`).run(completedAt, err, task.id);
         this.logTask(task.id, 'error', err);
         this.logTask(task.id, 'alert', `告警：发布失败（账号缺失），task=${task.id}`);
+        await this.sendAlert('publish_failed_missing_account', { taskId: task.id, accountId: task.accountId });
         continue;
       }
 
@@ -309,6 +325,7 @@ export class MatrixService {
           this.logTask(task.id, 'error', `发布失败（超过重试次数）：${err}`);
           this.recordPublishMetric({ taskId: task.id, platform: account.platform, success: false, errorCode: error.code || 'FAILED', latencyMs: Date.now() - started });
           this.logTask(task.id, 'alert', `告警：任务最终失败，task=${task.id}，platform=${account.platform}`);
+          await this.sendAlert('publish_failed_final', { taskId: task.id, platform: account.platform, errorCode: error.code || 'FAILED' });
         }
       }
     }
