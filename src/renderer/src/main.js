@@ -1,4 +1,5 @@
 import { createApp, computed, onMounted, onUnmounted, reactive } from 'vue';
+import './styles.css';
 
 const state = reactive({
   addressInput: 'https://example.com',
@@ -28,6 +29,18 @@ const state = reactive({
 });
 
 const activeContext = computed(() => state.contexts.find((ctx) => ctx.id === state.activeContextId) || null);
+
+const statCards = computed(() => {
+  const stats = state.dashboardStats || {};
+  return [
+    { label: '账号总数', value: stats.accountCount || 0 },
+    { label: '活跃账号', value: stats.activeAccountCount || 0 },
+    { label: '任务总数', value: stats.scheduleCount || 0 },
+    { label: '进行中', value: stats.pendingCount || 0 },
+    { label: '成功', value: stats.successCount || 0 },
+    { label: '失败', value: stats.failedCount || 0 },
+  ];
+});
 
 function readResult(result, fallback = {}) {
   if (!result?.ok) {
@@ -135,7 +148,6 @@ async function generateContent() {
   if (result?.content) state.generatedContent = result.content;
 }
 
-
 async function saveGeneratedContent() {
   if (!state.generatedContent) return;
   const result = readResult(await window.accountMatrix.saveGeneratedContent(state.generatedContent));
@@ -216,6 +228,7 @@ const App = {
     return {
       state,
       activeContext,
+      statCards,
       addTab,
       switchTab,
       closeTab,
@@ -239,168 +252,145 @@ const App = {
     };
   },
   template: `
-    <main style="font-family: Inter, -apple-system, sans-serif; height: 100vh; display: flex; flex-direction: column; background: #f7f7f9;">
-      <section style="height: 44px; border-bottom: 1px solid #d8d8dc; display: flex; align-items: center; gap: 8px; padding: 6px 10px; overflow-x: auto; background: #ececf1;">
-        <button @click="addTab" style="height: 30px; min-width: 30px; border: 1px solid #c5c5cc; border-radius: 8px; background: #fff;">+</button>
-        <div v-for="ctx in state.contexts" :key="ctx.id"
-          :style="{display:'inline-flex',alignItems:'center',gap:'6px',minWidth:'200px',maxWidth:'260px',padding:'6px 8px',borderRadius:'8px',border:'1px solid #c5c5cc',background:ctx.id===state.activeContextId?'#fff':'#e4e4ea'}">
-          <button @click="switchTab(ctx.id)" style="border:none;background:transparent;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;cursor:pointer;">
-            {{ ctx.title || '新标签页' }}
-          </button>
-          <button @click="closeTab(ctx.id)" style="border:none;background:transparent;cursor:pointer;">✕</button>
+    <main class="app-shell">
+      <div class="bg-orb bg-orb-a"></div>
+      <div class="bg-orb bg-orb-b"></div>
+      <section class="glass tabs-row">
+        <button class="icon-button" @click="addTab">+</button>
+        <div v-for="ctx in state.contexts" :key="ctx.id" class="tab-pill" :class="{ active: ctx.id===state.activeContextId }">
+          <button @click="switchTab(ctx.id)" class="tab-title">{{ ctx.title || '新标签页' }}</button>
+          <button @click="closeTab(ctx.id)" class="tab-close">✕</button>
         </div>
       </section>
 
-      <section style="height: 56px; border-bottom: 1px solid #d8d8dc; display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #fff;">
-        <input v-model="state.addressInput" @keyup.enter="navigateActiveTab" placeholder="输入网址，例如 openai.com"
-          style="flex: 1; height: 34px; border-radius: 8px; border: 1px solid #cfcfd6; padding: 0 12px;" />
-        <button @click="navigateActiveTab" style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #bbb; background: #fff; cursor: pointer;">访问</button>
+      <section class="glass address-row">
+        <input class="glass-input" v-model="state.addressInput" @keyup.enter="navigateActiveTab" placeholder="输入网址，例如 openai.com" />
+        <button class="primary-button" @click="navigateActiveTab">访问</button>
       </section>
 
-      <section v-if="state.errorMessage" style="padding: 6px 12px; font-size: 12px; color: #b42318; background: #fef3f2; border-bottom: 1px solid #fecdca;">
-        {{ state.errorMessage }}
+      <section v-if="state.errorMessage" class="glass error-banner">{{ state.errorMessage }}</section>
+
+      <section class="stats-grid">
+        <article v-for="item in statCards" :key="item.label" class="glass stat-card">
+          <div class="stat-label">{{ item.label }}</div>
+          <div class="stat-value">{{ item.value }}</div>
+        </article>
       </section>
 
-      <section style="padding: 8px 12px; font-size: 12px; border-bottom: 1px solid #ddd; background: #fff; display: flex; gap: 14px; flex-wrap: wrap;">
-        <span>账号总数: {{ state.dashboardStats?.accountCount || 0 }}</span>
-        <span>活跃账号: {{ state.dashboardStats?.activeAccountCount || 0 }}</span>
-        <span>任务总数: {{ state.dashboardStats?.scheduleCount || 0 }}</span>
-        <span>进行中: {{ state.dashboardStats?.pendingCount || 0 }}</span>
-        <span>成功: {{ state.dashboardStats?.successCount || 0 }}</span>
-        <span>失败: {{ state.dashboardStats?.failedCount || 0 }}</span>
-      </section>
-
-      <section style="height: 330px; border-bottom: 1px solid #e4e4ea; background: #fff; overflow: auto; padding: 10px 12px;">
-        <h3 style="margin: 0 0 8px;">增强版账号矩阵管理</h3>
-        <div style="display:grid;grid-template-columns: 1.1fr 1fr 1fr; gap:12px;">
-          <div style="border:1px solid #e8e8ed;border-radius:8px;padding:10px;">
+      <section class="glass workspace">
+        <h3>增强版账号矩阵管理</h3>
+        <div class="three-column">
+          <div class="glass panel">
             <strong>1) 账号管理（增/禁用/删除）</strong>
-            <div style="display:flex;gap:8px;margin-top:8px;">
-              <select v-model="state.accountForm.platform" style="height:30px;">
+            <div class="row mt-8">
+              <select v-model="state.accountForm.platform" class="glass-input">
                 <option v-for="p in state.platforms" :key="p" :value="p">{{ p }}</option>
               </select>
-              <input v-model="state.accountForm.nickname" placeholder="账号昵称" style="height:28px;flex:1;" />
-              <button @click="submitAccount">添加</button>
+              <input class="glass-input" v-model="state.accountForm.nickname" placeholder="账号昵称" />
+              <button class="primary-button" @click="submitAccount">添加</button>
             </div>
-            <div style="margin-top:8px;display:flex;gap:8px;">
-              <select v-model="state.scheduleFilter" @change="refreshMatrix">
+            <div class="row mt-8">
+              <select class="glass-input" v-model="state.scheduleFilter" @change="refreshMatrix">
                 <option value="all">全部</option><option value="scheduled">scheduled</option><option value="retrying">retrying</option><option value="running">running</option><option value="success">success</option><option value="failed">failed</option><option value="cancelled">cancelled</option>
               </select>
             </div>
-            <div style="margin-top:8px; max-height:90px; overflow:auto; font-size:12px;">
-              <div v-for="a in state.accounts" :key="a.id" style="display:flex; gap:6px; align-items:center; margin-bottom:4px;">
-                <span style="flex:1;">{{ a.platform }}-{{ a.nickname }} ({{ a.status }})</span>
-                <button @click="setAccountStatus(a.id, a.status === 'active' ? 'disabled' : 'active')">切换状态</button>
-                <button @click="removeAccount(a.id)">删除</button>
+            <div class="list-box mt-8">
+              <div v-for="a in state.accounts" :key="a.id" class="list-row">
+                <span>{{ a.platform }}-{{ a.nickname }} ({{ a.status }})</span>
+                <button class="ghost-button" @click="setAccountStatus(a.id, a.status === 'active' ? 'disabled' : 'active')">切换状态</button>
+                <button class="ghost-button danger" @click="removeAccount(a.id)">删除</button>
               </div>
             </div>
           </div>
 
-          <div style="border:1px solid #e8e8ed;border-radius:8px;padding:10px;">
+          <div class="glass panel">
             <strong>2) 热点 + AI 生成</strong>
-            <div style="margin-top:8px;display:flex;gap:8px;">
-              <button @click="collectHotspots">收集热点</button>
-              <select v-model="state.generationForm.hotspotId" style="flex:1;height:30px;">
+            <div class="row mt-8">
+              <button class="primary-button" @click="collectHotspots">收集热点</button>
+              <select class="glass-input" v-model="state.generationForm.hotspotId">
                 <option value="">请选择热点</option>
                 <option v-for="h in state.hotspots" :key="h.id" :value="h.id">{{ h.platform }} | {{ h.topic }}</option>
               </select>
             </div>
-            <div style="margin-top:8px;display:flex;gap:8px;">
-              <select v-model="state.generationForm.type"><option>文章</option><option>视频脚本</option><option>图片文案</option></select>
-              <input v-model="state.generationForm.tone" placeholder="语气" style="flex:1;" />
-              <button @click="generateContent">生成</button>
-              <button @click="saveGeneratedContent">保存素材</button>
+            <div class="row mt-8">
+              <select class="glass-input" v-model="state.generationForm.type"><option>文章</option><option>视频脚本</option><option>图片文案</option></select>
+              <input class="glass-input" v-model="state.generationForm.tone" placeholder="语气" />
+              <button class="primary-button" @click="generateContent">生成</button>
+              <button class="ghost-button" @click="saveGeneratedContent">保存素材</button>
             </div>
           </div>
 
-          <div style="border:1px solid #e8e8ed;border-radius:8px;padding:10px;">
+          <div class="glass panel">
             <strong>3) 发布任务（创建/取消/重试）</strong>
-            <div style="margin-top:8px;display:flex;gap:8px;">
-              <select v-model="state.scheduleForm.accountId" style="flex:1;">
+            <div class="row mt-8">
+              <select class="glass-input" v-model="state.scheduleForm.accountId">
                 <option value="">选择账号</option>
                 <option v-for="a in state.accounts" :key="a.id" :value="a.id">{{ a.platform }} - {{ a.nickname }}</option>
               </select>
-              <select v-model="state.scheduleForm.contentType"><option>文章</option><option>视频</option><option>图片</option><option>模拟鉴权失败</option></select>
+              <select class="glass-input" v-model="state.scheduleForm.contentType"><option>文章</option><option>视频</option><option>图片</option><option>模拟鉴权失败</option></select>
             </div>
-            <div style="margin-top:8px;display:flex;gap:8px;">
-              <select v-model="state.scheduleForm.contentAssetId" style="flex:1;">
+            <div class="row mt-8">
+              <select class="glass-input" v-model="state.scheduleForm.contentAssetId">
                 <option value="">无素材(按类型发布)</option>
                 <option v-for="asset in state.contentAssets" :key="asset.id" :value="asset.id">{{ asset.type }} | {{ asset.title }}</option>
               </select>
             </div>
-            <div style="margin-top:8px;display:flex;gap:8px;">
-              <input type="datetime-local" v-model="state.scheduleForm.publishAt" style="flex:1;" />
-              <button @click="createSchedule">定时发布</button>
+            <div class="row mt-8">
+              <input class="glass-input" type="datetime-local" v-model="state.scheduleForm.publishAt" />
+              <button class="primary-button" @click="createSchedule">定时发布</button>
             </div>
-            <div style="margin-top:8px;display:flex;gap:8px;">
-              <select v-model="state.scheduleFilter" @change="refreshMatrix">
-                <option value="all">全部</option><option value="scheduled">scheduled</option><option value="retrying">retrying</option><option value="running">running</option><option value="success">success</option><option value="failed">failed</option><option value="cancelled">cancelled</option>
-              </select>
-            </div>
-            <div style="margin-top:8px; max-height:90px; overflow:auto; font-size:12px;">
-              <div v-for="task in state.schedules.slice(0, 6)" :key="task.id" style="display:flex; gap:6px; align-items:center; margin-bottom:4px;">
-                <span style="flex:1;">{{ task.contentType }} / {{ task.status }} / retry={{ task.retryCount }}</span>
-                <button @click="cancelSchedule(task.id)">取消</button>
-                <button @click="retrySchedule(task.id)">重试</button>
-                <button @click="executeScheduleNow(task.id)">立即执行</button>
+            <div class="list-box mt-8">
+              <div v-for="task in state.schedules.slice(0, 6)" :key="task.id" class="list-row">
+                <span>{{ task.contentType }} / {{ task.status }} / retry={{ task.retryCount }}</span>
+                <button class="ghost-button" @click="cancelSchedule(task.id)">取消</button>
+                <button class="ghost-button" @click="retrySchedule(task.id)">重试</button>
+                <button class="ghost-button" @click="executeScheduleNow(task.id)">立即执行</button>
               </div>
             </div>
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns: 1fr 1fr; gap:12px; margin-top:10px;">
-          <div v-if="state.generatedContent" style="border:1px dashed #ccd; border-radius:8px; padding:8px; font-size:12px;">
+        <div class="two-column mt-12">
+          <div v-if="state.generatedContent" class="glass panel-sm">
             <div><strong>AI 标题：</strong>{{ state.generatedContent.title }}</div>
-            <pre style="white-space:pre-wrap; margin:6px 0 0;">{{ state.generatedContent.body }}</pre>
+            <pre>{{ state.generatedContent.body }}</pre>
           </div>
-
-          <div style="border:1px dashed #ccd; border-radius:8px; padding:8px; font-size:12px; max-height:120px; overflow:auto;">
+          <div class="glass panel-sm">
             <div><strong>素材库（最近）</strong></div>
-            <div v-for="asset in state.contentAssets" :key="asset.id" style="display:flex;gap:6px;align-items:center;">
-              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ asset.type }} | {{ asset.title }}</span>
-              <button @click="deleteContentAsset(asset.id)">删除</button>
+            <div v-for="asset in state.contentAssets" :key="asset.id" class="list-row">
+              <span>{{ asset.type }} | {{ asset.title }}</span>
+              <button class="ghost-button danger" @click="deleteContentAsset(asset.id)">删除</button>
             </div>
           </div>
-
-          <div style="border:1px dashed #ccd; border-radius:8px; padding:8px; font-size:12px; max-height:120px; overflow:auto;">
-            <div style="display:flex;justify-content:space-between;gap:8px;"><strong>任务日志</strong><div><input type="number" min="10" max="500" v-model.number="state.logLimit" style="width:68px;" @change="refreshMatrix" /><button @click="clearTaskLogs">清空</button></div></div>
-            <div v-for="log in state.taskLogs" :key="log.id" :style="{color: log.level === 'error' ? '#b42318' : '#344054'}">
-              [{{ log.level }}] {{ log.message }}
-            </div>
+          <div class="glass panel-sm">
+            <div class="list-head"><strong>任务日志</strong><div><input class="glass-input w70" type="number" min="10" max="500" v-model.number="state.logLimit" @change="refreshMatrix" /><button class="ghost-button" @click="clearTaskLogs">清空</button></div></div>
+            <div v-for="log in state.taskLogs" :key="log.id" :class="['log-line', log.level === 'error' ? 'is-error' : '']">[{{ log.level }}] {{ log.message }}</div>
+          </div>
+          <div class="glass panel-sm">
+            <div class="list-head"><strong>发布指标（最近）</strong><div><input class="glass-input w70" type="number" min="10" max="500" v-model.number="state.metricLimit" @change="refreshMatrix" /><button class="ghost-button" @click="clearPublishMetrics">清空</button></div></div>
+            <div v-for="metric in state.publishMetrics" :key="metric.id" class="log-line">{{ metric.platform }} | success={{ metric.success }} | latency={{ metric.latencyMs }}ms | code={{ metric.errorCode || '-' }}</div>
           </div>
         </div>
 
-        <div style="margin-top:10px;border:1px dashed #ccd; border-radius:8px; padding:8px; font-size:12px; max-height:88px; overflow:auto;">
-          <div style="display:flex;justify-content:space-between;gap:8px;"><strong>发布指标（最近）</strong><div><input type="number" min="10" max="500" v-model.number="state.metricLimit" style="width:68px;" @change="refreshMatrix" /><button @click="clearPublishMetrics">清空</button></div></div>
-          <div v-for="metric in state.publishMetrics" :key="metric.id">
-            {{ metric.platform }} | success={{ metric.success }} | latency={{ metric.latencyMs }}ms | code={{ metric.errorCode || '-' }}
+        <div class="two-column mt-12">
+          <div class="glass panel-sm tint-red">
+            <div><strong>最近失败任务（Top10）</strong></div>
+            <div v-for="f in state.recentFailures" :key="f.id" class="log-line">{{ f.contentType }} | retry={{ f.retryCount }} | {{ f.errorMessage || '-' }}</div>
           </div>
-        </div>
-
-
-        <div style="margin-top:10px;border:1px dashed #f3c7c7; border-radius:8px; padding:8px; font-size:12px; max-height:88px; overflow:auto; background:#fff7f7;">
-          <div><strong>最近失败任务（Top10）</strong></div>
-          <div v-for="f in state.recentFailures" :key="f.id">
-            {{ f.contentType }} | retry={{ f.retryCount }} | {{ f.errorMessage || '-' }}
-          </div>
-        </div>
-
-        <div style="margin-top:10px;border:1px dashed #b9d8ff; border-radius:8px; padding:8px; font-size:12px; background:#f5faff;">
-          <div style="display:flex;justify-content:space-between;align-items:center; gap:8px;">
-            <strong>数据快照（备份/恢复）</strong>
-            <div style="display:flex; gap:6px;">
-              <button @click="exportSnapshot">导出</button>
-              <button @click="importSnapshot('merge')">导入合并</button>
-              <button @click="importSnapshot('replace')">导入覆盖</button>
+          <div class="glass panel-sm tint-blue">
+            <div class="list-head"><strong>数据快照（备份/恢复）</strong>
+              <div>
+                <button class="ghost-button" @click="exportSnapshot">导出</button>
+                <button class="ghost-button" @click="importSnapshot('merge')">导入合并</button>
+                <button class="ghost-button" @click="importSnapshot('replace')">导入覆盖</button>
+              </div>
             </div>
+            <textarea class="glass-input" v-model="state.snapshotText" placeholder="导出的快照 JSON 会显示在这里，也可粘贴后导入"></textarea>
           </div>
-          <textarea v-model="state.snapshotText" placeholder="导出的快照 JSON 会显示在这里，也可粘贴后导入" style="margin-top:8px;width:100%;height:88px;font-size:12px;"></textarea>
         </div>
       </section>
 
-      <section style="flex: 1; display: grid; place-items: center; color: #8a8a93; font-size: 13px; padding: 4px 12px;">
-        当前标签 partition：{{ activeContext?.partition || '-' }}；每个标签使用独立存储环境（Cookie / LocalStorage / Cache 完全隔离）。
-      </section>
+      <section class="glass footer-note">当前标签 partition：{{ activeContext?.partition || '-' }}；每个标签使用独立存储环境（Cookie / LocalStorage / Cache 完全隔离）。</section>
     </main>
   `,
 };
