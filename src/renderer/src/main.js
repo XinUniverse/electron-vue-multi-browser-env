@@ -10,7 +10,9 @@ const state = reactive({
   accounts: [],
   hotspots: [],
   schedules: [],
+  taskLogs: [],
   generatedContent: null,
+  errorMessage: '',
 
   accountForm: { platform: '抖音', nickname: '', aiEnabled: true },
   generationForm: { hotspotId: '', type: '文章', tone: '专业' },
@@ -19,76 +21,94 @@ const state = reactive({
 
 const activeContext = computed(() => state.contexts.find((ctx) => ctx.id === state.activeContextId) || null);
 
+function readResult(result, fallback = {}) {
+  if (!result?.ok) {
+    state.errorMessage = result?.error || '操作失败';
+    return null;
+  }
+  state.errorMessage = '';
+  return { ...fallback, ...result };
+}
+
 async function refreshContexts() {
-  const payload = await window.isolatedBrowser.listContexts();
+  const payload = readResult(await window.isolatedBrowser.listContexts());
+  if (!payload) return;
   state.contexts = payload.contexts;
   state.activeContextId = payload.activeContextId;
   if (activeContext.value?.currentUrl) state.addressInput = activeContext.value.currentUrl;
 }
 
 async function refreshMatrix() {
-  const [p, a, h, s] = await Promise.all([
+  const [p0, a0, h0, s0, l0] = await Promise.all([
     window.accountMatrix.getPlatforms(),
     window.accountMatrix.listAccounts(),
     window.accountMatrix.listHotspots(),
     window.accountMatrix.listSchedules(),
+    window.accountMatrix.listTaskLogs(),
   ]);
+
+  const p = readResult(p0);
+  const a = readResult(a0);
+  const h = readResult(h0);
+  const s = readResult(s0);
+  const l = readResult(l0);
+  if (!p || !a || !h || !s || !l) return;
+
   state.platforms = p.platforms;
   state.accounts = a.accounts;
   state.hotspots = h.hotspots;
   state.schedules = s.schedules;
+  state.taskLogs = l.logs;
 
-  if (!state.accountForm.platform && state.platforms.length) {
-    state.accountForm.platform = state.platforms[0];
-  }
+  if (!state.accountForm.platform && state.platforms.length) state.accountForm.platform = state.platforms[0];
 }
 
 async function addTab() {
-  const result = await window.isolatedBrowser.createContext('https://example.com');
-  if (result.ok) await refreshContexts();
+  const result = readResult(await window.isolatedBrowser.createContext('https://example.com'));
+  if (result) await refreshContexts();
 }
 
 async function switchTab(id) {
-  await window.isolatedBrowser.switchContext(id);
+  readResult(await window.isolatedBrowser.switchContext(id));
   await refreshContexts();
 }
 
 async function closeTab(id) {
-  await window.isolatedBrowser.closeContext(id);
+  readResult(await window.isolatedBrowser.closeContext(id));
   await refreshContexts();
 }
 
 async function navigateActiveTab() {
   if (!state.activeContextId) return;
-  await window.isolatedBrowser.navigateContext(state.activeContextId, state.addressInput);
+  readResult(await window.isolatedBrowser.navigateContext(state.activeContextId, state.addressInput));
   await refreshContexts();
 }
 
 async function submitAccount() {
   if (!state.accountForm.nickname.trim()) return;
-  await window.accountMatrix.addAccount(state.accountForm);
+  const result = readResult(await window.accountMatrix.addAccount(state.accountForm));
+  if (!result) return;
   state.accountForm.nickname = '';
   await refreshMatrix();
 }
 
 async function collectHotspots() {
-  await window.accountMatrix.collectHotspots();
+  const result = readResult(await window.accountMatrix.collectHotspots());
+  if (!result) return;
   await refreshMatrix();
-  if (!state.generationForm.hotspotId && state.hotspots.length) {
-    state.generationForm.hotspotId = state.hotspots[0].id;
-  }
+  if (!state.generationForm.hotspotId && state.hotspots.length) state.generationForm.hotspotId = state.hotspots[0].id;
 }
 
 async function generateContent() {
   if (!state.generationForm.hotspotId) return;
-  const result = await window.accountMatrix.generateContent(state.generationForm);
-  if (result.ok) state.generatedContent = result.content;
+  const result = readResult(await window.accountMatrix.generateContent(state.generationForm));
+  if (result?.content) state.generatedContent = result.content;
 }
 
 async function createSchedule() {
   if (!state.scheduleForm.accountId || !state.scheduleForm.publishAt) return;
-  await window.accountMatrix.schedulePublish(state.scheduleForm);
-  await refreshMatrix();
+  const result = readResult(await window.accountMatrix.schedulePublish(state.scheduleForm));
+  if (result) await refreshMatrix();
 }
 
 const App = {
@@ -96,7 +116,10 @@ const App = {
     onMounted(async () => {
       await refreshContexts();
       await refreshMatrix();
-      state.pollingId = window.setInterval(refreshContexts, 1200);
+      state.pollingId = window.setInterval(async () => {
+        await refreshContexts();
+        await refreshMatrix();
+      }, 1500);
     });
 
     onUnmounted(() => {
@@ -135,7 +158,11 @@ const App = {
         <button @click="navigateActiveTab" style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #bbb; background: #fff; cursor: pointer;">访问</button>
       </section>
 
-      <section style="height: 220px; border-bottom: 1px solid #e4e4ea; background: #fff; overflow: auto; padding: 10px 12px;">
+      <section v-if="state.errorMessage" style="padding: 6px 12px; font-size: 12px; color: #b42318; background: #fef3f2; border-bottom: 1px solid #fecdca;">
+        {{ state.errorMessage }}
+      </section>
+
+      <section style="height: 270px; border-bottom: 1px solid #e4e4ea; background: #fff; overflow: auto; padding: 10px 12px;">
         <h3 style="margin: 0 0 8px;">多平台账号矩阵管理模板（优先：抖音 / 小红书 / 头条）</h3>
         <div style="display:grid;grid-template-columns: 1.1fr 1fr 1fr; gap:12px;">
           <div style="border:1px solid #e8e8ed;border-radius:8px;padding:10px;">
@@ -183,14 +210,24 @@ const App = {
           </div>
         </div>
 
-        <div v-if="state.generatedContent" style="margin-top:10px; border:1px dashed #ccd; border-radius:8px; padding:8px; font-size:12px;">
-          <div><strong>AI 生成标题：</strong>{{ state.generatedContent.title }}</div>
-          <pre style="white-space:pre-wrap; margin:6px 0 0;">{{ state.generatedContent.body }}</pre>
+        <div style="display:grid;grid-template-columns: 1fr 1fr; gap:12px; margin-top:10px;">
+          <div v-if="state.generatedContent" style="border:1px dashed #ccd; border-radius:8px; padding:8px; font-size:12px;">
+            <div><strong>AI 生成标题：</strong>{{ state.generatedContent.title }}</div>
+            <pre style="white-space:pre-wrap; margin:6px 0 0;">{{ state.generatedContent.body }}</pre>
+          </div>
+          <div style="border:1px dashed #ccd; border-radius:8px; padding:8px; font-size:12px; max-height:120px; overflow:auto;">
+            <div><strong>任务日志</strong></div>
+            <div v-for="log in state.taskLogs" :key="log.id" :style="{color: log.level === 'error' ? '#b42318' : '#344054'}">
+              [{{ log.level }}] {{ log.message }}
+            </div>
+          </div>
         </div>
       </section>
 
-      <section style="flex: 1; display: grid; place-items: center; color: #8a8a93; font-size: 13px;">
+      <section style="flex: 1; display: grid; place-items: center; color: #8a8a93; font-size: 13px; padding: 4px 12px;">
         当前标签 partition：{{ activeContext?.partition || '-' }}；每个标签使用独立存储环境（Cookie / LocalStorage / Cache 完全隔离）。
+        <br />
+        发布任务状态支持：scheduled / running / success / failed
       </section>
     </main>
   `,

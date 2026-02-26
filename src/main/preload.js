@@ -17,4 +17,5 @@ contextBridge.exposeInMainWorld('accountMatrix', {
   generateContent: (payload) => ipcRenderer.invoke('matrix:generateContent', payload),
   schedulePublish: (payload) => ipcRenderer.invoke('matrix:schedulePublish', payload),
   listSchedules: () => ipcRenderer.invoke('matrix:listSchedules'),
+  listTaskLogs: () => ipcRenderer.invoke('matrix:listTaskLogs'),
 });
