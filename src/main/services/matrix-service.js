@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import fs from 'node:fs';
+import Database from 'better-sqlite3';
 import { PlatformAdapterRegistry } from './platform-adapters.js';
 import { AlertReporter } from './alert-reporter.js';
 
@@ -8,8 +9,13 @@ export class MatrixService {
   constructor({ baseDir, platforms = ['抖音', '小红书', '头条'], alertReporter } = {}) {
     this.platforms = platforms;
     this.dbFile = path.join(baseDir, 'matrix-store.db');
-    this.db = new DatabaseSync(this.dbFile);
-    this.adapterRegistry = new PlatformAdapterRegistry();
+    try {
+      fs.mkdirSync(path.dirname(this.dbFile), { recursive: true });
+    } catch (err) {
+      console.error('Failed to create directory:', err);
+    }
+    this.db = new Database(this.dbFile);
+    this.adapterRegistry = new PlatformAdapterRegistry(this.buildPlatformConfig());
     this.alertReporter = alertReporter || new AlertReporter({
       webhookUrl: process.env.ALERT_WEBHOOK_URL || '',
       wecomWebhookUrl: process.env.WECOM_WEBHOOK_URL || '',
@@ -92,6 +98,21 @@ export class MatrixService {
 
   getPlatforms() {
     return this.platforms;
+  }
+
+  buildPlatformConfig() {
+    const parse = (prefix, defaults = {}) => ({
+      mode: process.env[`${prefix}_MODE`] || defaults.mode || 'mock',
+      publishUrl: process.env[`${prefix}_PUBLISH_URL`] || defaults.publishUrl || '',
+      appId: process.env[`${prefix}_APP_ID`] || defaults.appId || 'demo-app',
+      appSecret: process.env[`${prefix}_APP_SECRET`] || defaults.appSecret || 'demo-secret',
+      timeoutMs: Number(process.env[`${prefix}_TIMEOUT_MS`] || defaults.timeoutMs || 8000),
+    });
+    return {
+      抖音: parse('DY', { mode: 'mock' }),
+      小红书: parse('XHS', { mode: 'mock' }),
+      头条: parse('TT', { mode: 'mock' }),
+    };
   }
 
   listAccounts() {

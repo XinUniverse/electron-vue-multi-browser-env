@@ -15,12 +15,13 @@ let schedulerId = null;
 
 const chromeHeight = 120;
 const sidebarWidth = 0;
-const matrixService = new MatrixService({ baseDir: app.getPath('userData') });
+// const matrixService = new MatrixService({ baseDir: app.getPath('userData') });
+const matrixService = new MatrixService({ baseDir: path.join(process.cwd(), 'data') });
 
 function normalizeUrl(inputUrl) {
-  if (!inputUrl) return 'https://example.com';
+  if (!inputUrl) return 'https://baidu.com';
   const value = inputUrl.trim();
-  if (!value) return 'https://example.com';
+  if (!value) return 'https://baidu.com';
   if (value.startsWith('http://') || value.startsWith('https://')) return value;
   return `https://${value}`;
 }
@@ -144,7 +145,7 @@ function navigateContext(id, url) {
 app.whenReady().then(() => {
   createMainWindow();
 
-  const first = createIsolatedContext('https://example.com');
+  const first = createIsolatedContext('https://baidu.com');
   attachContext(first.id);
 
   schedulerId = setInterval(() => {
