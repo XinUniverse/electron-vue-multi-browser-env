@@ -28,7 +28,7 @@ test('hotspots can be collected and used for content generation', () => {
   assert.match(content.title, /视频脚本/);
 });
 
-test('scheduler transitions due tasks and creates logs with adapter', async () => {
+test('scheduler transitions due tasks and records success metrics', async () => {
   const { service } = createTempService();
   const account = service.addAccount({ platform: '头条', nickname: '账号B', aiEnabled: false });
 
@@ -41,16 +41,16 @@ test('scheduler transitions due tasks and creates logs with adapter', async () =
   assert.equal(schedules[0].status, 'success');
   assert.match(schedules[0].remoteId, /^tt-/);
 
-  const logs = service.listTaskLogs();
-  assert.equal(logs.length, 1);
-  assert.equal(logs[0].level, 'info');
+  const metrics = service.listPublishMetrics();
+  assert.equal(metrics.length, 1);
+  assert.equal(metrics[0].success, true);
 });
 
-test('scheduler failed with alert after retries when adapter missing', async () => {
+test('scheduler failed with mapped error code and alert after retries', async () => {
   const { service } = createTempService();
-  const account = service.addAccount({ platform: '未知平台', nickname: '账号C', aiEnabled: false });
+  const account = service.addAccount({ platform: '抖音', nickname: '账号C', aiEnabled: false });
   const dueTime = new Date(Date.now() - 2000).toISOString();
-  service.schedulePublish({ accountId: account.id, contentType: '图片', publishAt: dueTime });
+  service.schedulePublish({ accountId: account.id, contentType: '模拟鉴权失败', publishAt: dueTime });
 
   await service.runDueTasks();
   await service.runDueTasks();
@@ -59,6 +59,9 @@ test('scheduler failed with alert after retries when adapter missing', async () 
   const schedules = service.listSchedules();
   assert.equal(schedules[0].status, 'failed');
   assert.equal(schedules[0].retryCount, 3);
+
+  const metrics = service.listPublishMetrics();
+  assert.ok(metrics.some((m) => m.errorCode === 'AUTH_FAILED'));
 
   const logs = service.listTaskLogs();
   assert.ok(logs.some((log) => log.level === 'alert'));

@@ -45,6 +45,7 @@ function createStubs() {
     schedulePublish: (p) => ({ id: 's1', ...p, status: 'scheduled' }),
     listSchedules: () => [{ id: 's1', status: 'scheduled' }],
     listTaskLogs: () => [{ id: 'l1', level: 'info', message: 'ok' }],
+    listPublishMetrics: () => [{ id: 'm1', success: true, latencyMs: 30 }],
   };
 
   return { contextApi, matrixService };
@@ -66,6 +67,10 @@ test('ipc handlers register and success path works', async () => {
   const addAccount = await ipcMain.invoke('matrix:addAccount', { platform: '抖音', nickname: 'a' });
   assert.equal(addAccount.ok, true);
   assert.equal(addAccount.account.id, 'a1');
+
+  const metrics = await ipcMain.invoke('matrix:listPublishMetrics', {});
+  assert.equal(metrics.ok, true);
+  assert.equal(metrics.metrics.length, 1);
 });
 
 test('ipc handlers return guarded errors for bad payload', async () => {

@@ -63,4 +63,5 @@ export function registerIpcHandlers({ ipcMain, contextApi, matrixService }) {
 
   ipcMain.handle('matrix:listSchedules', withGuard(async () => ({ ok: true, schedules: matrixService.listSchedules() })));
   ipcMain.handle('matrix:listTaskLogs', withGuard(async () => ({ ok: true, logs: matrixService.listTaskLogs() })));
+  ipcMain.handle('matrix:listPublishMetrics', withGuard(async () => ({ ok: true, metrics: matrixService.listPublishMetrics() })));
 }

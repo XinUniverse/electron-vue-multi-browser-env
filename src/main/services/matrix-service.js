@@ -52,6 +52,16 @@ export class MatrixService {
         message TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS publish_metrics (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        success INTEGER NOT NULL,
+        error_code TEXT,
+        latency_ms INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
 
     const scheduleColumns = this.db.prepare(`PRAGMA table_info(schedules)`).all();
@@ -216,6 +226,23 @@ export class MatrixService {
     `).run(randomUUID(), taskId, level, message, createdAt);
   }
 
+
+  listPublishMetrics(limit = 50) {
+    return this.db.prepare(`
+      SELECT id, task_id as taskId, platform, success, error_code as errorCode, latency_ms as latencyMs, created_at as createdAt
+      FROM publish_metrics
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(limit).map((row) => ({ ...row, success: Boolean(row.success) }));
+  }
+
+  recordPublishMetric({ taskId, platform, success, errorCode = null, latencyMs }) {
+    this.db.prepare(`
+      INSERT INTO publish_metrics (id, task_id, platform, success, error_code, latency_ms, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(randomUUID(), taskId, platform, Number(success), errorCode, latencyMs, new Date().toISOString());
+  }
+
   async runDueTasks() {
     const tasks = this.db.prepare(`
       SELECT id, account_id as accountId, content_type as contentType, publish_at as publishAt, retry_count as retryCount
@@ -241,6 +268,7 @@ export class MatrixService {
       const startedAt = new Date().toISOString();
       this.db.prepare(`UPDATE schedules SET status = 'running', started_at = ? WHERE id = ?`).run(startedAt, task.id);
 
+      const started = Date.now();
       try {
         const adapter = this.adapterRegistry.getAdapter(account.platform);
         if (!adapter) throw new Error(`未找到平台适配器: ${account.platform}`);
@@ -258,6 +286,7 @@ export class MatrixService {
         `).run(completedAt, result.remoteId || null, task.id);
 
         this.logTask(task.id, 'info', `任务执行成功：${task.contentType} -> ${account.platform}`);
+        this.recordPublishMetric({ taskId: task.id, platform: account.platform, success: true, latencyMs: Date.now() - started });
       } catch (error) {
         const retryCount = Number(task.retryCount || 0) + 1;
         const err = error instanceof Error ? error.message : '平台发布失败';
@@ -269,6 +298,7 @@ export class MatrixService {
             WHERE id = ?
           `).run(retryCount, err, task.id);
           this.logTask(task.id, 'warn', `发布失败，准备第 ${retryCount} 次重试：${err}`);
+          this.recordPublishMetric({ taskId: task.id, platform: account.platform, success: false, errorCode: error.code || 'RETRY', latencyMs: Date.now() - started });
         } else {
           const completedAt = new Date().toISOString();
           this.db.prepare(`
@@ -277,6 +307,7 @@ export class MatrixService {
             WHERE id = ?
           `).run(completedAt, retryCount, err, task.id);
           this.logTask(task.id, 'error', `发布失败（超过重试次数）：${err}`);
+          this.recordPublishMetric({ taskId: task.id, platform: account.platform, success: false, errorCode: error.code || 'FAILED', latencyMs: Date.now() - started });
           this.logTask(task.id, 'alert', `告警：任务最终失败，task=${task.id}，platform=${account.platform}`);
         }
       }
@@ -286,6 +317,13 @@ export class MatrixService {
       DELETE FROM task_logs
       WHERE id NOT IN (
         SELECT id FROM task_logs ORDER BY created_at DESC LIMIT 100
+      )
+    `);
+
+    this.db.exec(`
+      DELETE FROM publish_metrics
+      WHERE id NOT IN (
+        SELECT id FROM publish_metrics ORDER BY created_at DESC LIMIT 500
       )
     `);
   }
