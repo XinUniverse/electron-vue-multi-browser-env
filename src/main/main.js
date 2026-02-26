@@ -147,7 +147,11 @@ app.whenReady().then(() => {
   const first = createIsolatedContext('https://example.com');
   attachContext(first.id);
 
-  schedulerId = setInterval(() => matrixService.runDueTasks(), 1000);
+  schedulerId = setInterval(() => {
+    matrixService.runDueTasks().catch((error) => {
+      console.error('scheduler runDueTasks error:', error);
+    });
+  }, 1000);
 
   registerIpcHandlers({
     ipcMain,
