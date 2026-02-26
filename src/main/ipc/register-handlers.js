@@ -1,8 +1,15 @@
 import {
   validateAddAccountPayload,
+  validateDeleteAccountPayload,
+  validateContentAssetPayload,
+  validateDeleteContentAssetPayload,
   validateGenerateContentPayload,
+  validateImportSnapshotPayload,
   validateNavigatePayload,
+  validateListQueryPayload,
   validateSchedulePayload,
+  validateTaskActionPayload,
+  validateUpdateAccountPayload,
 } from '../utils/validators.js';
 
 function withGuard(handler) {
@@ -45,6 +52,17 @@ export function registerIpcHandlers({ ipcMain, contextApi, matrixService }) {
     return { ok: true, account };
   }));
 
+  ipcMain.handle('matrix:updateAccountStatus', withGuard(async (payload) => {
+    validateUpdateAccountPayload(payload);
+    const account = matrixService.updateAccountStatus(payload);
+    return { ok: true, account };
+  }));
+
+  ipcMain.handle('matrix:deleteAccount', withGuard(async (payload) => {
+    validateDeleteAccountPayload(payload);
+    return { ok: true, account: matrixService.deleteAccount(payload) };
+  }));
+
   ipcMain.handle('matrix:collectHotspots', withGuard(async () => ({ ok: true, hotspots: matrixService.collectHotspots() })));
   ipcMain.handle('matrix:listHotspots', withGuard(async () => ({ ok: true, hotspots: matrixService.listHotspots() })));
 
@@ -55,13 +73,63 @@ export function registerIpcHandlers({ ipcMain, contextApi, matrixService }) {
     return { ok: true, content };
   }));
 
+
+  ipcMain.handle('matrix:saveGeneratedContent', withGuard(async (payload) => {
+    validateContentAssetPayload(payload);
+    return { ok: true, asset: matrixService.saveGeneratedContent(payload) };
+  }));
+
+  ipcMain.handle('matrix:listContentAssets', withGuard(async (payload = {}) => {
+    validateListQueryPayload(payload);
+    return { ok: true, assets: matrixService.listContentAssets(payload.limit || 50) };
+  }));
+
+  ipcMain.handle('matrix:deleteContentAsset', withGuard(async (payload) => {
+    validateDeleteContentAssetPayload(payload);
+    return { ok: true, asset: matrixService.deleteContentAsset(payload) };
+  }));
+
   ipcMain.handle('matrix:schedulePublish', withGuard(async (payload) => {
     validateSchedulePayload(payload);
     const task = matrixService.schedulePublish(payload);
     return { ok: true, task };
   }));
 
-  ipcMain.handle('matrix:listSchedules', withGuard(async () => ({ ok: true, schedules: matrixService.listSchedules() })));
-  ipcMain.handle('matrix:listTaskLogs', withGuard(async () => ({ ok: true, logs: matrixService.listTaskLogs() })));
-  ipcMain.handle('matrix:listPublishMetrics', withGuard(async () => ({ ok: true, metrics: matrixService.listPublishMetrics() })));
+  ipcMain.handle('matrix:cancelSchedule', withGuard(async (payload) => {
+    validateTaskActionPayload(payload);
+    return { ok: true, task: matrixService.cancelSchedule(payload) };
+  }));
+
+  ipcMain.handle('matrix:retrySchedule', withGuard(async (payload) => {
+    validateTaskActionPayload(payload);
+    return { ok: true, task: matrixService.retrySchedule(payload) };
+  }));
+
+  ipcMain.handle('matrix:executeScheduleNow', withGuard(async (payload) => {
+    validateTaskActionPayload(payload);
+    return { ok: true, task: matrixService.executeScheduleNow(payload) };
+  }));
+
+  ipcMain.handle('matrix:listSchedules', withGuard(async ({ status = 'all' }) => ({ ok: true, schedules: matrixService.listSchedulesByStatus({ status }) })));
+
+  ipcMain.handle('matrix:listTaskLogs', withGuard(async (payload = {}) => {
+    validateListQueryPayload(payload);
+    return { ok: true, logs: matrixService.listTaskLogs(payload.limit || 100) };
+  }));
+  ipcMain.handle('matrix:clearTaskLogs', withGuard(async () => ({ ok: true, result: matrixService.clearTaskLogs() })));
+  ipcMain.handle('matrix:listPublishMetrics', withGuard(async (payload = {}) => {
+    validateListQueryPayload(payload);
+    return { ok: true, metrics: matrixService.listPublishMetrics(payload.limit || 50) };
+  }));
+  ipcMain.handle('matrix:clearPublishMetrics', withGuard(async () => ({ ok: true, result: matrixService.clearPublishMetrics() })));
+  ipcMain.handle('matrix:getDashboardStats', withGuard(async () => ({ ok: true, stats: matrixService.getDashboardStats() })));
+  ipcMain.handle('matrix:exportSnapshot', withGuard(async () => ({ ok: true, snapshot: matrixService.exportSnapshot() })));
+  ipcMain.handle('matrix:importSnapshot', withGuard(async (payload) => {
+    validateImportSnapshotPayload(payload);
+    return { ok: true, result: matrixService.importSnapshot(payload) };
+  }));
+  ipcMain.handle('matrix:getRecentFailures', withGuard(async (payload = {}) => {
+    validateListQueryPayload(payload);
+    return { ok: true, failures: matrixService.getRecentFailures(payload.limit || 20) };
+  }));
 }

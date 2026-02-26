@@ -1,0 +1,123 @@
+:root {
+  color-scheme: light;
+  font-family: 'SF Pro Display', 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+
+.app-shell {
+  min-height: 100vh;
+  position: relative;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: #1f2937;
+  background: radial-gradient(circle at 10% 10%, #e7f2ff, transparent 40%),
+    radial-gradient(circle at 90% 0%, #f8ecff, transparent 45%),
+    linear-gradient(180deg, #ecf3ff 0%, #eef1fa 45%, #e8ecf6 100%);
+}
+
+.bg-orb { position: absolute; border-radius: 999px; filter: blur(30px); pointer-events: none; opacity: 0.5; }
+.bg-orb-a { width: 240px; height: 240px; top: -70px; right: -50px; background: #6aa7ff; }
+.bg-orb-b { width: 280px; height: 280px; bottom: -100px; left: -90px; background: #d08bff; }
+
+.glass {
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  background: rgba(255, 255, 255, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  box-shadow: 0 10px 26px rgba(31, 41, 55, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  border-radius: 18px;
+}
+
+.tabs-row, .address-row { display: flex; align-items: center; gap: 8px; padding: 8px; overflow-x: auto; }
+
+.icon-button, .primary-button, .ghost-button {
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  border-radius: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.icon-button, .ghost-button {
+  background: rgba(255, 255, 255, 0.55);
+  color: #334155;
+}
+
+.primary-button {
+  background: linear-gradient(135deg, #6aa7ff, #5e84ff);
+  color: #fff;
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+.ghost-button.danger { color: #b42318; border-color: rgba(180, 35, 24, 0.24); }
+
+.tab-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 190px;
+  max-width: 260px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.tab-pill.active {
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 6px 18px rgba(67, 97, 238, 0.18);
+}
+
+.tab-title, .tab-close { border: none; background: transparent; cursor: pointer; }
+.tab-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+
+.glass-input, textarea, select {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(255, 255, 255, 0.76);
+  border-radius: 10px;
+  min-height: 34px;
+  padding: 0 10px;
+  width: 100%;
+}
+
+textarea { min-height: 100px; resize: vertical; padding: 10px; font-size: 12px; }
+
+.error-banner { color: #b42318; padding: 8px 12px; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.stat-card { padding: 10px 12px; }
+.stat-label { color: #475569; font-size: 12px; }
+.stat-value { font-weight: 700; font-size: 20px; color: #0f172a; margin-top: 2px; }
+
+.workspace { padding: 12px; }
+.workspace h3 { margin: 0 0 10px; }
+.three-column { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 12px; }
+.two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.panel, .panel-sm { padding: 10px; }
+.panel-sm { min-height: 120px; max-height: 170px; overflow: auto; }
+
+.row { display: flex; gap: 8px; align-items: center; }
+.mt-8 { margin-top: 8px; }
+.mt-12 { margin-top: 12px; }
+.w70 { width: 70px !important; }
+
+.list-box { max-height: 95px; overflow: auto; display: grid; gap: 6px; }
+.list-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.list-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.log-line { color: #334155; font-size: 12px; margin-bottom: 4px; }
+.log-line.is-error { color: #b42318; }
+
+.tint-red { background: rgba(255, 240, 240, 0.62); }
+.tint-blue { background: rgba(236, 246, 255, 0.66); }
+
+.panel-sm pre { white-space: pre-wrap; margin: 8px 0 0; font-size: 12px; }
+.footer-note { text-align: center; font-size: 12px; color: #475569; padding: 8px 12px; }
+
+@media (max-width: 1280px) {
+  .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .three-column, .two-column { grid-template-columns: 1fr; }
+}
