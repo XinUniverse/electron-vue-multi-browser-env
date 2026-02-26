@@ -41,16 +41,16 @@
 - [x] F4. 增加 IPC 入参校验（`validators`）。
 - [x] F5. 增加调度器轮询执行器与日志。
 - [x] F6. 使用本地持久化存储替代纯内存（当前为 JSON 文件持久化）。
-- [ ] F7. 升级到 SQLite 存储（依赖可用后执行）。
-- [ ] F8. 增加单元测试（matrix-service / validators / scheduler）。
+- [x] F7. 升级到 SQLite 存储（已使用 `node:sqlite` 落地）。
+- [x] F8. 增加单元测试（matrix-service / validators / scheduler）。
 
 ## G. 当前未完成项与下一步开发
 
-1. **G1 - SQLite 存储落地**（对应 F7）
-   - 新增 DB 层与迁移脚本。
-   - 用 SQLite 替代 JSON 持久化。
+1. **G1 - IPC 集成测试补齐**
+   - 增加主进程 IPC handler 级别测试。
+   - 覆盖错误路径与边界入参。
 
-2. **G2 - 自动化测试补齐**（对应 F8）
-   - 增加服务层单元测试。
-   - 增加关键 IPC 集成测试。
+2. **G2 - 平台真实 API 适配层**
+   - 将模拟发布替换为平台 API 适配器。
+   - 增加失败重试、限流、告警能力。
 

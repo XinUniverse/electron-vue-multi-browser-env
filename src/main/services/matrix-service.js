@@ -1,28 +1,54 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 export class MatrixService {
   constructor({ baseDir, platforms = ['抖音', '小红书', '头条'] }) {
     this.platforms = platforms;
-    this.storeFile = path.join(baseDir, 'matrix-store.json');
-    this.data = this.loadStore();
+    this.dbFile = path.join(baseDir, 'matrix-store.db');
+    this.db = new DatabaseSync(this.dbFile);
+    this.initSchema();
   }
 
-  loadStore() {
-    try {
-      if (fs.existsSync(this.storeFile)) {
-        return JSON.parse(fs.readFileSync(this.storeFile, 'utf-8'));
-      }
-    } catch {
-      // fallback to default store
-    }
-    return { accounts: [], hotspots: [], schedules: [], taskLogs: [] };
-  }
+  initSchema() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS accounts (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        nickname TEXT NOT NULL,
+        ai_enabled INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
 
-  persist() {
-    fs.mkdirSync(path.dirname(this.storeFile), { recursive: true });
-    fs.writeFileSync(this.storeFile, JSON.stringify(this.data, null, 2), 'utf-8');
+      CREATE TABLE IF NOT EXISTS hotspots (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        topic TEXT NOT NULL,
+        heat INTEGER NOT NULL,
+        collected_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS schedules (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        publish_at TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT,
+        error_message TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS task_logs (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        level TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
   }
 
   getPlatforms() {
@@ -30,7 +56,17 @@ export class MatrixService {
   }
 
   listAccounts() {
-    return this.data.accounts;
+    return this.db.prepare(`
+      SELECT
+        id,
+        platform,
+        nickname,
+        ai_enabled as aiEnabled,
+        status,
+        created_at as createdAt
+      FROM accounts
+      ORDER BY created_at DESC
+    `).all().map((row) => ({ ...row, aiEnabled: Boolean(row.aiEnabled) }));
   }
 
   addAccount(payload) {
@@ -42,28 +78,50 @@ export class MatrixService {
       status: payload.status || 'active',
       createdAt: new Date().toISOString(),
     };
-    this.data.accounts.push(account);
-    this.persist();
+
+    this.db.prepare(`
+      INSERT INTO accounts (id, platform, nickname, ai_enabled, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(account.id, account.platform, account.nickname, Number(account.aiEnabled), account.status, account.createdAt);
+
     return account;
   }
 
   collectHotspots() {
+    this.db.exec('DELETE FROM hotspots');
     const now = new Date().toISOString();
-    this.data.hotspots = [
+    const list = [
       { id: randomUUID(), platform: '抖音', topic: 'AIGC短视频脚本自动化', heat: 97, collectedAt: now },
       { id: randomUUID(), platform: '小红书', topic: '春季穿搭爆款笔记', heat: 92, collectedAt: now },
       { id: randomUUID(), platform: '头条', topic: 'AI提效工具测评', heat: 89, collectedAt: now },
     ];
-    this.persist();
-    return this.data.hotspots;
+
+    const stmt = this.db.prepare(`
+      INSERT INTO hotspots (id, platform, topic, heat, collected_at)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    for (const h of list) {
+      stmt.run(h.id, h.platform, h.topic, h.heat, h.collectedAt);
+    }
+    return list;
   }
 
   listHotspots() {
-    return this.data.hotspots;
+    return this.db.prepare(`
+      SELECT id, platform, topic, heat, collected_at as collectedAt
+      FROM hotspots
+      ORDER BY heat DESC
+    `).all();
   }
 
   generateContent({ hotspotId, type = '文章', tone = '专业' }) {
-    const hotspot = this.data.hotspots.find((item) => item.id === hotspotId);
+    const hotspot = this.db.prepare(`
+      SELECT id, platform, topic, heat, collected_at as collectedAt
+      FROM hotspots
+      WHERE id = ?
+      LIMIT 1
+    `).get(hotspotId);
+
     if (!hotspot) return null;
 
     return {
@@ -89,59 +147,94 @@ export class MatrixService {
       completedAt: null,
       errorMessage: null,
     };
-    this.data.schedules.push(task);
-    this.persist();
+
+    this.db.prepare(`
+      INSERT INTO schedules (id, account_id, content_type, publish_at, status, created_at, started_at, completed_at, error_message)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      task.id,
+      task.accountId,
+      task.contentType,
+      task.publishAt,
+      task.status,
+      task.createdAt,
+      task.startedAt,
+      task.completedAt,
+      task.errorMessage,
+    );
+
     return task;
   }
 
   listSchedules() {
-    return this.data.schedules;
+    return this.db.prepare(`
+      SELECT
+        id,
+        account_id as accountId,
+        content_type as contentType,
+        publish_at as publishAt,
+        status,
+        created_at as createdAt,
+        started_at as startedAt,
+        completed_at as completedAt,
+        error_message as errorMessage
+      FROM schedules
+      ORDER BY created_at DESC
+    `).all();
   }
 
   listTaskLogs() {
-    return this.data.taskLogs;
+    return this.db.prepare(`
+      SELECT id, task_id as taskId, level, message, created_at as createdAt
+      FROM task_logs
+      ORDER BY created_at DESC
+      LIMIT 100
+    `).all();
   }
 
   runDueTasks() {
-    const now = Date.now();
-    let changed = false;
+    const tasks = this.db.prepare(`
+      SELECT id, account_id as accountId, content_type as contentType, publish_at as publishAt
+      FROM schedules
+      WHERE status = 'scheduled'
+    `).all();
 
-    for (const task of this.data.schedules) {
-      if (task.status !== 'scheduled') continue;
+    const now = Date.now();
+    for (const task of tasks) {
       const ts = new Date(task.publishAt).getTime();
       if (Number.isNaN(ts) || ts > now) continue;
 
-      task.status = 'running';
-      task.startedAt = new Date().toISOString();
-      changed = true;
+      const startedAt = new Date().toISOString();
+      this.db.prepare(`UPDATE schedules SET status = 'running', started_at = ? WHERE id = ?`).run(startedAt, task.id);
 
-      const accountExists = this.data.accounts.some((a) => a.id === task.accountId);
+      const accountExists = this.db.prepare('SELECT id FROM accounts WHERE id = ? LIMIT 1').get(task.accountId);
       if (accountExists) {
-        task.status = 'success';
-        task.completedAt = new Date().toISOString();
-        this.data.taskLogs.unshift({
-          id: randomUUID(),
-          taskId: task.id,
-          level: 'info',
-          message: `任务执行成功：${task.contentType}`,
-          createdAt: new Date().toISOString(),
-        });
+        const completedAt = new Date().toISOString();
+        this.db.prepare(`
+          UPDATE schedules SET status = 'success', completed_at = ?, error_message = NULL WHERE id = ?
+        `).run(completedAt, task.id);
+        this.db.prepare(`
+          INSERT INTO task_logs (id, task_id, level, message, created_at)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(randomUUID(), task.id, 'info', `任务执行成功：${task.contentType}`, completedAt);
       } else {
-        task.status = 'failed';
-        task.completedAt = new Date().toISOString();
-        task.errorMessage = '账号不存在或已删除';
-        this.data.taskLogs.unshift({
-          id: randomUUID(),
-          taskId: task.id,
-          level: 'error',
-          message: task.errorMessage,
-          createdAt: new Date().toISOString(),
-        });
+        const completedAt = new Date().toISOString();
+        const err = '账号不存在或已删除';
+        this.db.prepare(`
+          UPDATE schedules SET status = 'failed', completed_at = ?, error_message = ? WHERE id = ?
+        `).run(completedAt, err, task.id);
+        this.db.prepare(`
+          INSERT INTO task_logs (id, task_id, level, message, created_at)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(randomUUID(), task.id, 'error', err, completedAt);
       }
-      changed = true;
     }
 
-    this.data.taskLogs = this.data.taskLogs.slice(0, 100);
-    if (changed) this.persist();
+    this.db.exec(`
+      DELETE FROM task_logs
+      WHERE id NOT IN (
+        SELECT id FROM task_logs ORDER BY created_at DESC LIMIT 100
+      )
+    `);
   }
 }
